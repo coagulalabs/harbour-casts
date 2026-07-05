@@ -1,0 +1,7 @@
+* Sat Jul 05 2025 Open Source Developer
+- v1.1.0: Episode downloads, show notes, cached cover art
+- Async episode lists with load-more pagination
+- Playback speed, sleep timer, queue, and resume support
+
+* Fri Jul 04 2025 Open Source Developer
+- v1.0.0: Initial release of Casts for Sailfish OS

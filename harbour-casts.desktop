@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+X-Nemo-Application-Type=silica-qt5
+Icon=harbour-casts
+Exec=harbour-casts
+Name=Casts
+Comment=Podcast player for Sailfish OS
+
+[X-Sailjail]
+OrganizationName=harbour-casts
+ApplicationName=harbour-casts
+Permissions=Internet;UserDirs;Downloads;Audio;Compatibility
