@@ -25,7 +25,7 @@ From the SailfishOS repo root:
 
 Requires Sailfish SDK target `SailfishOS-5.0.0.62-aarch64` (or compatible).
 
-Standalone source repo: [github.com/crows/harbour-casts](https://github.com/crows/harbour-casts)
+Standalone source repo: [github.com/coagulalabs/harbour-casts](https://github.com/coagulalabs/harbour-casts)
 
 ## Publish (GitHub + OpenRepos)
 

@@ -4,7 +4,7 @@ Summary:    Native podcast player for Sailfish OS
 Version:    1.1.0
 Release:    1
 License:    BSD-3-Clause
-URL:        https://github.com/crows/harbour-casts
+URL:        https://github.com/coagulalabs/harbour-casts
 Source0:    %{name}-%{version}.tar.bz2
 Requires:   sailfishsilica-qt5 >= 0.10.9
 BuildRequires:  pkgconfig(sailfishapp) >= 1.0.2
