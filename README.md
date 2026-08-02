@@ -1,6 +1,8 @@
-# Casts — harbour-casts
+# Casts
 
-Native podcast player for Sailfish OS. No trackers, no ads, full offline support.
+Native podcast player for [Sailfish OS](https://sailfishos.org/). No trackers, no ads, full offline support.
+
+**Version:** 1.1.0 · **License:** [BSD-3-Clause](LICENSE) · **Target:** Jolla C2 / Sailfish OS 5.x (aarch64)
 
 ## Features
 
@@ -13,32 +15,29 @@ Native podcast player for Sailfish OS. No trackers, no ads, full offline support
 - Resume playback where you left off
 - Pull to refresh feeds; load more for large catalogs
 
-## Build & install
+## Install
 
-From the SailfishOS repo root:
-
-```bash
-./scripts/deploy-casts.sh          # build + install on phone
-./scripts/deploy-casts.sh --clean  # clean rebuild
-./scripts/package-casts.sh         # RPM → dist-casts/
-```
-
-Requires Sailfish SDK target `SailfishOS-5.0.0.62-aarch64` (or compatible).
-
-Standalone source repo: [github.com/coagulalabs/harbour-casts](https://github.com/coagulalabs/harbour-casts)
-
-## Publish (GitHub + OpenRepos)
+Grab the latest RPM from [Releases](https://github.com/coagulalabs/harbour-casts/releases) (or OpenRepos when published) and install on device:
 
 ```bash
-./scripts/publish-casts.sh                           # build + cache RPM, sync to harbour-casts repo
-./scripts/publish-casts.sh --github                  # + GitHub release (GITHUB_TOKEN or gh)
-OPENREPOS_USERNAME=... OPENREPOS_PASSWORD=... \
-  ./scripts/publish-casts.sh --openrepos             # + OpenRepos upload
+pkcon install-local harbour-casts-1.1.0-1.aarch64.rpm
 ```
 
-Cached RPM: `dist-casts/harbour-casts-1.1.0-1.aarch64.rpm`
+## Build
 
-OpenRepos account needs the **publisher** role at [openrepos.net/user/register](https://openrepos.net/user/register).
+Requires the [Sailfish SDK](https://sailfishos.org/wiki/Application_SDK) with target `SailfishOS-5.0.0.62-aarch64` (or compatible) and Docker access for `sfdk`.
+
+```bash
+./scripts/build.sh          # build with sfdk
+./scripts/build.sh --clean  # clean rebuild
+./scripts/package.sh        # build + copy RPM to dist/
+```
+
+Override the SDK binary if needed:
+
+```bash
+SFDK=/path/to/sfdk ./scripts/build.sh
+```
 
 ## Data locations
 
@@ -50,10 +49,10 @@ OpenRepos account needs the **publisher** role at [openrepos.net/user/register](
 
 ## Stack
 
-- C++ / Qt 5: RSS parser, SQLite, QNetworkAccessManager, QMediaPlayer
+- C++ / Qt 5 — RSS parser, SQLite, `QNetworkAccessManager`, `QMediaPlayer`
 - Silica QML UI
-- Target: Jolla C2 / Sailfish OS 5.x (aarch64)
+- Sailjail profile for Internet, audio, downloads, and user dirs
 
 ## License
 
-BSD-3-Clause
+[BSD 3-Clause](LICENSE)
