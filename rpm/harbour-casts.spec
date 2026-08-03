@@ -1,7 +1,7 @@
 Name:       harbour-casts
 
 Summary:    Native podcast player for Sailfish OS
-Version:    1.1.0
+Version:    1.1.1
 Release:    1
 License:    BSD-3-Clause
 URL:        https://github.com/coagulalabs/harbour-casts
