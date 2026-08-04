@@ -51,8 +51,39 @@ Page {
         }
 
         delegate: ListItem {
+            id: episodeItem
             width: list.width
             contentHeight: Theme.itemSizeMedium
+
+            menu: ContextMenu {
+                MenuItem {
+                    text: qsTr("Show notes")
+                    onClicked: {
+                        PodcastStore.openEpisodeNotes(episodeId);
+                        pageStack.push(Qt.resolvedUrl("EpisodeNotesPage.qml"));
+                    }
+                }
+                MenuItem {
+                    text: PodcastStore.isDownloading(episodeId)
+                        ? qsTr("Downloading…")
+                        : (downloaded ? qsTr("Downloaded") : qsTr("Download"))
+                    enabled: !downloaded && !PodcastStore.isDownloading(episodeId)
+                    onClicked: PodcastStore.downloadEpisode(episodeId)
+                }
+                MenuItem {
+                    text: inQueue ? qsTr("Remove from queue") : qsTr("Add to queue")
+                    onClicked: {
+                        if (inQueue)
+                            PodcastStore.removeFromQueue(episodeId);
+                        else
+                            PodcastStore.addToQueue(episodeId);
+                    }
+                }
+                MenuItem {
+                    text: completed ? qsTr("Mark unplayed") : qsTr("Mark played")
+                    onClicked: PodcastStore.markCompleted(episodeId, !completed)
+                }
+            }
 
             onClicked: {
                 Player.playEpisode(episodeId);
@@ -101,36 +132,6 @@ Page {
                 visible: inQueue && !downloaded
                 source: "image://theme/icon-m-playlist"
                 opacity: 0.7
-            }
-
-            ContextMenu {
-                MenuItem {
-                    text: qsTr("Show notes")
-                    onClicked: {
-                        PodcastStore.openEpisodeNotes(episodeId);
-                        pageStack.push(Qt.resolvedUrl("EpisodeNotesPage.qml"));
-                    }
-                }
-                MenuItem {
-                    text: PodcastStore.isDownloading(episodeId)
-                        ? qsTr("Downloading…")
-                        : (downloaded ? qsTr("Downloaded") : qsTr("Download"))
-                    enabled: !downloaded && !PodcastStore.isDownloading(episodeId)
-                    onClicked: PodcastStore.downloadEpisode(episodeId)
-                }
-                MenuItem {
-                    text: inQueue ? qsTr("Remove from queue") : qsTr("Add to queue")
-                    onClicked: {
-                        if (inQueue)
-                            PodcastStore.removeFromQueue(episodeId);
-                        else
-                            PodcastStore.addToQueue(episodeId);
-                    }
-                }
-                MenuItem {
-                    text: completed ? qsTr("Mark unplayed") : qsTr("Mark played")
-                    onClicked: PodcastStore.markCompleted(episodeId, !completed)
-                }
             }
         }
 

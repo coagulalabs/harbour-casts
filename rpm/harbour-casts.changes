@@ -1,4 +1,8 @@
 * Tue Aug 04 2026 Open Source Developer
+- v1.1.3: Fix episode context menu (Download, queue, notes)
+- Assign ContextMenu to ListItem.menu so press-and-hold works
+
+* Tue Aug 04 2026 Open Source Developer
 - v1.1.2: Fix PullDownMenu on subscriptions and episodes pages
 - Restore Remove subscription / refresh / queue actions
 
