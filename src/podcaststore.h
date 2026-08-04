@@ -9,6 +9,10 @@
 class EpisodesModel;
 class SubscriptionsModel;
 class ArtworkCache;
+class QFile;
+class QNetworkReply;
+class QNetworkRequest;
+class QUrl;
 
 class PodcastStore : public QObject
 {
@@ -26,6 +30,10 @@ class PodcastStore : public QObject
     Q_PROPERTY(bool episodesLoading READ episodesLoading NOTIFY episodesLoadingChanged)
     Q_PROPERTY(bool episodesHasMore READ episodesHasMore NOTIFY episodesMetaChanged)
     Q_PROPERTY(int episodesTotalCount READ episodesTotalCount NOTIFY episodesMetaChanged)
+    Q_PROPERTY(bool downloading READ downloading NOTIFY downloadStateChanged)
+    Q_PROPERTY(int downloadingEpisodeId READ downloadingEpisodeId NOTIFY downloadStateChanged)
+    Q_PROPERTY(int downloadPercent READ downloadPercent NOTIFY downloadProgress)
+    Q_PROPERTY(QString downloadTitle READ downloadTitle NOTIFY downloadStateChanged)
 
 public:
     explicit PodcastStore(QObject *parent = nullptr);
@@ -44,6 +52,10 @@ public:
     bool episodesLoading() const { return m_episodesLoading; }
     bool episodesHasMore() const;
     int episodesTotalCount() const;
+    bool downloading() const { return m_downloadReply != nullptr; }
+    int downloadingEpisodeId() const { return m_downloadEpisodeId; }
+    int downloadPercent() const { return m_downloadPercent; }
+    QString downloadTitle() const { return m_downloadTitle; }
 
     Q_INVOKABLE bool init();
     Q_INVOKABLE void addFeed(const QString &url);
@@ -88,6 +100,7 @@ signals:
     void episodesLoadingChanged();
     void episodesMetaChanged();
     void episodesChanged();
+    void downloadStateChanged();
     void downloadProgress(int episodeId, int percent);
     void downloadFinished(int episodeId, bool success);
     void artworkCached(int feedId);
@@ -95,6 +108,9 @@ signals:
 
 private slots:
     void onFeedReplyFinished();
+    void onDownloadMetaDataChanged();
+    void onDownloadReadyRead();
+    void onDownloadFinished();
 
 private:
     void setBusy(bool busy);
@@ -106,15 +122,31 @@ private:
     void updateQueueCount();
     QString downloadsDir() const;
     QString dbPath() const;
+    void configureRequest(QNetworkRequest *req, const QUrl &url, bool followRedirects = true) const;
+    bool isUsableLocalFile(const QString &path) const;
+    void clearLocalPath(int episodeId);
+    void finishDownload(bool success, const QString &errorMessage = QString());
+    QString extensionForReply(QNetworkReply *reply, const QString &audioUrl) const;
+    void resetDownloadIO();
+    void issueDownloadRequest(const QUrl &url);
+    bool openDownloadFile();
+    static bool isRedirectStatus(int status);
 
     ArtworkCache *m_artwork = nullptr;
     QNetworkAccessManager m_nam;
     QNetworkReply *m_feedReply = nullptr;
     QNetworkReply *m_downloadReply = nullptr;
+    QFile *m_downloadFile = nullptr;
     QString m_pendingFeedUrl;
     int m_pendingFeedId = -1;
     int m_downloadEpisodeId = 0;
+    int m_downloadPercent = 0;
+    int m_downloadRedirects = 0;
+    qint64 m_downloadBytes = 0;
     QString m_downloadTargetPath;
+    QString m_downloadSafeName;
+    QString m_downloadTitle;
+    QString m_downloadSourceUrl;
 
     SubscriptionsModel *m_subscriptions = nullptr;
     EpisodesModel *m_episodes = nullptr;

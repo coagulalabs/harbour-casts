@@ -8,6 +8,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
@@ -181,8 +182,7 @@ void PodcastStore::fetchFeed(const QString &url, int existingFeedId)
     setStatus(tr("Fetching feed…"));
 
     QNetworkRequest req;
-    req.setUrl(QUrl(url));
-    req.setRawHeader("User-Agent", "harbour-casts/1.0");
+    configureRequest(&req, QUrl(url));
     m_feedReply = m_nam.get(req);
     connect(m_feedReply, &QNetworkReply::finished, this, &PodcastStore::onFeedReplyFinished);
 }
@@ -432,7 +432,7 @@ QString PodcastStore::episodeLocalPath(int episodeId) const
     q.addBindValue(episodeId);
     if (q.exec() && q.next()) {
         const QString path = q.value(0).toString();
-        if (!path.isEmpty() && QFile::exists(path)) return path;
+        if (isUsableLocalFile(path)) return path;
     }
     return QString();
 }
@@ -472,9 +472,191 @@ void PodcastStore::savePosition(int episodeId, int positionMs)
     q.exec();
 }
 
+void PodcastStore::configureRequest(QNetworkRequest *req, const QUrl &url, bool followRedirects) const
+{
+    req->setUrl(url);
+    // Browser-like UA: some CDNs reject short custom agents.
+    req->setRawHeader("User-Agent",
+                      "Mozilla/5.0 (Mobile; Sailfish; rv:1.0) harbour-casts/1.1");
+    req->setRawHeader("Accept", "*/*");
+    if (followRedirects) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
+        req->setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+#endif
+    } else {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
+        req->setAttribute(QNetworkRequest::FollowRedirectsAttribute, false);
+#endif
+    }
+}
+
+bool PodcastStore::isRedirectStatus(int status)
+{
+    return status == 301 || status == 302 || status == 303
+        || status == 307 || status == 308;
+}
+
+void PodcastStore::resetDownloadIO()
+{
+    if (m_downloadReply) {
+        disconnect(m_downloadReply, nullptr, this, nullptr);
+        m_downloadReply->abort();
+        m_downloadReply->deleteLater();
+        m_downloadReply = nullptr;
+    }
+    if (m_downloadFile) {
+        if (m_downloadFile->isOpen())
+            m_downloadFile->close();
+        m_downloadFile->deleteLater();
+        m_downloadFile = nullptr;
+    }
+    if (!m_downloadTargetPath.isEmpty())
+        QFile::remove(m_downloadTargetPath);
+}
+
+bool PodcastStore::openDownloadFile()
+{
+    if (m_downloadFile)
+        return m_downloadFile->isOpen();
+
+    QFile::remove(m_downloadTargetPath);
+    m_downloadFile = new QFile(m_downloadTargetPath, this);
+    if (!m_downloadFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        const QString err = tr("Cannot write download: %1").arg(m_downloadFile->errorString());
+        qWarning() << err << "path" << m_downloadTargetPath;
+        m_downloadFile->deleteLater();
+        m_downloadFile = nullptr;
+        finishDownload(false, err);
+        return false;
+    }
+    qWarning() << "Download writing to" << m_downloadTargetPath;
+    return true;
+}
+
+void PodcastStore::issueDownloadRequest(const QUrl &url)
+{
+    if (!url.isValid()) {
+        finishDownload(false, tr("Invalid download URL"));
+        return;
+    }
+
+    QNetworkRequest req;
+    // Manual redirects: Qt 5.6 can prepend redirect bodies when auto-following,
+    // which corrupts the audio file and fails validation.
+    configureRequest(&req, url, false);
+    req.setRawHeader("Accept", "audio/*,*/*;q=0.2");
+
+    m_downloadReply = m_nam.get(req);
+    connect(m_downloadReply, &QNetworkReply::metaDataChanged,
+            this, &PodcastStore::onDownloadMetaDataChanged);
+    connect(m_downloadReply, &QNetworkReply::readyRead,
+            this, &PodcastStore::onDownloadReadyRead);
+    connect(m_downloadReply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 received, qint64 total) {
+                // Ignore tiny redirect payloads in the UI.
+                if (!m_downloadFile) return;
+                m_downloadBytes = received;
+                int percent = 0;
+                if (total > 0)
+                    percent = int(qMin(qint64(100), (received * 100) / total));
+                else if (received > 0)
+                    percent = -1;
+                if (m_downloadPercent != percent) {
+                    m_downloadPercent = percent;
+                    emit downloadProgress(m_downloadEpisodeId, m_downloadPercent);
+                }
+                if (percent >= 0)
+                    setStatus(tr("Downloading “%1”… %2%").arg(m_downloadTitle).arg(percent));
+                else
+                    setStatus(tr("Downloading “%1”… %2 KB")
+                                  .arg(m_downloadTitle)
+                                  .arg(received / 1024));
+            });
+    connect(m_downloadReply, &QNetworkReply::finished,
+            this, &PodcastStore::onDownloadFinished);
+}
+
+bool PodcastStore::isUsableLocalFile(const QString &path) const
+{
+    if (path.isEmpty()) return false;
+    QFileInfo info(path);
+    // Redirect/error bodies we previously saved were ~1KB text.
+    if (!info.exists() || !info.isFile() || info.size() < 64 * 1024)
+        return false;
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QByteArray head = f.read(64);
+    if (head.startsWith("Temporary Redirect") || head.startsWith("Redirecting")
+        || head.startsWith("<!DOCTYPE") || head.startsWith("<html")
+        || head.startsWith("<?xml") || head.startsWith("{")) {
+        return false;
+    }
+    // ID3 / MPEG frame sync / Ogg / fLaC / MP4 ftyp
+    if (head.startsWith("ID3") || head.startsWith("OggS") || head.startsWith("fLaC"))
+        return true;
+    if (head.size() >= 2) {
+        const uchar b0 = uchar(head.at(0));
+        const uchar b1 = uchar(head.at(1));
+        if (b0 == 0xFF && (b1 & 0xE0) == 0xE0) return true;
+    }
+    if (head.size() >= 8 && head.mid(4, 4) == "ftyp") return true;
+    // Large opaque binary is still usable for offline playback.
+    return true;
+}
+
+void PodcastStore::clearLocalPath(int episodeId)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral("SELECT local_path FROM episodes WHERE id=?"));
+    q.addBindValue(episodeId);
+    if (q.exec() && q.next()) {
+        const QString path = q.value(0).toString();
+        if (!path.isEmpty())
+            QFile::remove(path);
+    }
+    q.prepare(QStringLiteral("UPDATE episodes SET local_path='' WHERE id=?"));
+    q.addBindValue(episodeId);
+    q.exec();
+}
+
+QString PodcastStore::extensionForReply(QNetworkReply *reply, const QString &audioUrl) const
+{
+    const QUrl finalUrl = reply ? reply->url() : QUrl(audioUrl);
+    const QString path = finalUrl.path().toLower();
+    if (path.endsWith(QLatin1String(".m4a")) || path.endsWith(QLatin1String(".aac")))
+        return QStringLiteral(".m4a");
+    if (path.endsWith(QLatin1String(".ogg")) || path.endsWith(QLatin1String(".opus")))
+        return QStringLiteral(".ogg");
+    if (path.endsWith(QLatin1String(".flac")))
+        return QStringLiteral(".flac");
+    if (path.endsWith(QLatin1String(".mp3")))
+        return QStringLiteral(".mp3");
+
+    const QByteArray ctype = reply
+        ? reply->header(QNetworkRequest::ContentTypeHeader).toByteArray().toLower()
+        : QByteArray();
+    if (ctype.contains("mp4") || ctype.contains("m4a") || ctype.contains("aac"))
+        return QStringLiteral(".m4a");
+    if (ctype.contains("ogg") || ctype.contains("opus"))
+        return QStringLiteral(".ogg");
+    if (ctype.contains("flac"))
+        return QStringLiteral(".flac");
+    return QStringLiteral(".mp3");
+}
+
 void PodcastStore::downloadEpisode(int episodeId)
 {
-    if (m_downloadReply) cancelDownload();
+    resetDownloadIO();
+    m_downloadEpisodeId = 0;
+    m_downloadPercent = 0;
+    m_downloadBytes = 0;
+    m_downloadRedirects = 0;
+    m_downloadTargetPath.clear();
+    m_downloadSafeName.clear();
+    m_downloadTitle.clear();
+    m_downloadSourceUrl.clear();
+    emit downloadStateChanged();
 
     QSqlQuery q;
     q.prepare(QStringLiteral("SELECT title, audio_url, local_path FROM episodes WHERE id=?"));
@@ -482,68 +664,220 @@ void PodcastStore::downloadEpisode(int episodeId)
     if (!q.exec() || !q.next()) return;
 
     const QString existing = q.value(2).toString();
-    if (!existing.isEmpty() && QFile::exists(existing)) {
+    if (isUsableLocalFile(existing)) {
+        setStatus(tr("Already downloaded"));
         emit downloadFinished(episodeId, true);
         m_episodes->reload();
         return;
     }
+    if (!existing.isEmpty()) {
+        // Stale redirect/error body from older builds — wipe and retry.
+        QFile::remove(existing);
+        clearLocalPath(episodeId);
+    }
 
     const QString title = q.value(0).toString();
     const QString audioUrl = q.value(1).toString();
+    if (audioUrl.isEmpty()) {
+        setError(tr("Episode has no audio URL"));
+        emit downloadFinished(episodeId, false);
+        return;
+    }
+
     QString safe = title;
     safe.replace(QRegularExpression(QStringLiteral("[^a-zA-Z0-9._-]+")), QStringLiteral("_"));
+    if (safe.isEmpty()) safe = QStringLiteral("episode-%1").arg(episodeId);
     if (safe.length() > 80) safe = safe.left(80);
 
-    const QString ext = audioUrl.contains(QStringLiteral(".ogg"), Qt::CaseInsensitive)
-        ? QStringLiteral(".ogg") : QStringLiteral(".mp3");
-    m_downloadTargetPath = downloadsDir() + QLatin1Char('/') + safe + ext;
     m_downloadEpisodeId = episodeId;
+    m_downloadPercent = 0;
+    m_downloadBytes = 0;
+    m_downloadRedirects = 0;
+    m_downloadTitle = title;
+    m_downloadSafeName = safe;
+    m_downloadSourceUrl = audioUrl;
+    m_downloadTargetPath = downloadsDir() + QLatin1Char('/') + safe + QStringLiteral(".part");
+    QFile::remove(m_downloadTargetPath);
 
-    QNetworkRequest req;
-    req.setUrl(QUrl(audioUrl));
-    req.setRawHeader("User-Agent", "harbour-casts/1.0");
-    m_downloadReply = m_nam.get(req);
-    connect(m_downloadReply, &QNetworkReply::downloadProgress, this,
-            [this](qint64 received, qint64 total) {
-                if (total > 0)
-                    emit downloadProgress(m_downloadEpisodeId, int(received * 100 / total));
-            });
-    connect(m_downloadReply, &QNetworkReply::finished, this, [this]() {
-        const int epId = m_downloadEpisodeId;
-        QNetworkReply *reply = m_downloadReply;
-        m_downloadReply = nullptr;
-        if (!reply) return;
+    emit downloadStateChanged();
+    emit downloadProgress(m_downloadEpisodeId, 0);
+    setStatus(tr("Downloading “%1”…").arg(m_downloadTitle));
+    m_episodes->reload();
 
-        bool ok = reply->error() == QNetworkReply::NoError;
-        if (ok) {
-            QFile f(m_downloadTargetPath);
-            ok = f.open(QIODevice::WriteOnly) && f.write(reply->readAll()) >= 0;
-            f.close();
-            if (ok) {
-                QSqlQuery q;
-                q.prepare(QStringLiteral("UPDATE episodes SET local_path=? WHERE id=?"));
-                q.addBindValue(m_downloadTargetPath);
-                q.addBindValue(epId);
-                q.exec();
-            }
-        }
+    qWarning() << "Download start" << audioUrl << "-> dir" << downloadsDir();
+    issueDownloadRequest(QUrl(audioUrl));
+}
+
+void PodcastStore::onDownloadMetaDataChanged()
+{
+    if (!m_downloadReply) return;
+    const int status = m_downloadReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (isRedirectStatus(status)) {
+        // Discard redirect payload; never open the audio file for these.
+        m_downloadReply->readAll();
+        return;
+    }
+    if (status == 200 || status == 206) {
+        if (openDownloadFile())
+            onDownloadReadyRead(); // flush any already-buffered body
+    }
+}
+
+void PodcastStore::onDownloadReadyRead()
+{
+    if (!m_downloadReply || !m_downloadFile) return;
+    const QByteArray chunk = m_downloadReply->readAll();
+    if (!chunk.isEmpty())
+        m_downloadFile->write(chunk);
+}
+
+void PodcastStore::onDownloadFinished()
+{
+    QNetworkReply *reply = m_downloadReply;
+    m_downloadReply = nullptr;
+    if (!reply) {
+        finishDownload(false, tr("Download aborted"));
+        return;
+    }
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    qWarning() << "Download finished status" << status
+               << "error" << reply->error() << reply->errorString()
+               << "url" << reply->url()
+               << "bytes" << (m_downloadFile ? m_downloadFile->size() : -1)
+               << "redirects" << m_downloadRedirects;
+
+    if (isRedirectStatus(status)
+        || reply->attribute(QNetworkRequest::RedirectionTargetAttribute).isValid()) {
+        QUrl next = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+        if (next.isRelative())
+            next = reply->url().resolved(next);
         reply->deleteLater();
-        emit downloadFinished(epId, ok);
-        m_episodes->reload();
-    });
+
+        if (!next.isValid() || next.toString().isEmpty()) {
+            finishDownload(false, tr("Download redirect missing location"));
+            return;
+        }
+        if (++m_downloadRedirects > 10) {
+            finishDownload(false, tr("Too many download redirects"));
+            return;
+        }
+
+        setStatus(tr("Downloading “%1”… (redirect %2)")
+                      .arg(m_downloadTitle)
+                      .arg(m_downloadRedirects));
+        issueDownloadRequest(next);
+        return;
+    }
+
+    // Flush any remaining buffered bytes (only if we opened for a 200).
+    if (m_downloadFile)
+        m_downloadFile->write(reply->readAll());
+
+    const int epId = m_downloadEpisodeId;
+    const QString title = m_downloadTitle;
+    QString err;
+
+    const QByteArray ctype = reply->header(QNetworkRequest::ContentTypeHeader).toByteArray().toLower();
+    bool ok = reply->error() == QNetworkReply::NoError;
+    if (ok && status > 0 && status != 200 && status != 206) {
+        ok = false;
+        err = tr("Download failed (HTTP %1)").arg(status);
+    }
+    if (ok && (ctype.startsWith("text/html") || ctype.startsWith("text/plain")
+               || ctype.startsWith("application/json"))) {
+        ok = false;
+        err = tr("Server returned %1 instead of audio").arg(QString::fromUtf8(ctype));
+    }
+    if (ok && !m_downloadFile) {
+        ok = false;
+        err = tr("Download produced no file");
+    }
+
+    if (m_downloadFile) {
+        m_downloadFile->flush();
+        m_downloadFile->close();
+    }
+
+    QString finalPath;
+    if (ok) {
+        const QString ext = extensionForReply(reply, m_downloadSourceUrl);
+        finalPath = downloadsDir() + QLatin1Char('/') + m_downloadSafeName + ext;
+        QFile::remove(finalPath);
+        if (!QFile::rename(m_downloadTargetPath, finalPath)) {
+            ok = QFile::copy(m_downloadTargetPath, finalPath);
+            QFile::remove(m_downloadTargetPath);
+        }
+        if (ok && !isUsableLocalFile(finalPath)) {
+            ok = false;
+            err = tr("Downloaded file is not valid audio (%1 bytes)")
+                      .arg(QFileInfo(finalPath).size());
+            QFile::remove(finalPath);
+        }
+    }
+
+    reply->deleteLater();
+
+    if (ok) {
+        QSqlQuery q;
+        q.prepare(QStringLiteral("UPDATE episodes SET local_path=? WHERE id=?"));
+        q.addBindValue(finalPath);
+        q.addBindValue(epId);
+        q.exec();
+        qWarning() << "Download OK" << finalPath << QFileInfo(finalPath).size();
+        finishDownload(true);
+        setStatus(tr("Downloaded “%1”").arg(title));
+    } else {
+        QFile::remove(m_downloadTargetPath);
+        if (err.isEmpty())
+            err = reply->error() != QNetworkReply::NoError
+                ? tr("Download failed: %1").arg(reply->errorString())
+                : tr("Download failed");
+        qWarning() << "Download FAIL" << err;
+        finishDownload(false, err);
+    }
+}
+
+void PodcastStore::finishDownload(bool success, const QString &errorMessage)
+{
+    if (m_downloadFile) {
+        if (m_downloadFile->isOpen())
+            m_downloadFile->close();
+        m_downloadFile->deleteLater();
+        m_downloadFile = nullptr;
+    }
+
+    const int epId = m_downloadEpisodeId;
+    m_downloadEpisodeId = 0;
+    m_downloadPercent = 0;
+    m_downloadBytes = 0;
+    m_downloadRedirects = 0;
+    m_downloadTargetPath.clear();
+    m_downloadSafeName.clear();
+    m_downloadTitle.clear();
+    m_downloadSourceUrl.clear();
+    emit downloadStateChanged();
+    emit downloadProgress(0, 0);
+
+    if (!success && !errorMessage.isEmpty())
+        setError(errorMessage);
+    if (epId > 0)
+        emit downloadFinished(epId, success);
+    m_episodes->reload();
 }
 
 void PodcastStore::cancelDownload()
 {
-    if (!m_downloadReply) return;
-    m_downloadReply->abort();
-    m_downloadReply->deleteLater();
-    m_downloadReply = nullptr;
+    if (!m_downloadReply && !m_downloadFile && m_downloadEpisodeId == 0)
+        return;
+
+    resetDownloadIO();
+    finishDownload(false, tr("Download cancelled"));
 }
 
 bool PodcastStore::isDownloading(int episodeId) const
 {
-    return m_downloadReply && m_downloadEpisodeId == episodeId;
+    return m_downloadEpisodeId == episodeId && (m_downloadReply || m_downloadFile);
 }
 
 void PodcastStore::updateQueueCount()

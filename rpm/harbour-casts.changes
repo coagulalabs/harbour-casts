@@ -1,4 +1,9 @@
 * Tue Aug 04 2026 Open Source Developer
+- v1.1.4: Fix episode downloads through multi-hop CDN redirects
+- Progress indicators and success/failure notifications
+- Reject/replace corrupt redirect stub files from older builds
+
+* Tue Aug 04 2026 Open Source Developer
 - v1.1.3: Fix episode context menu (Download, queue, notes)
 - Assign ContextMenu to ListItem.menu so press-and-hold works
 

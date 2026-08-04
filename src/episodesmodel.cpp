@@ -2,6 +2,7 @@
 
 #include <QtConcurrent>
 
+#include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QThread>
@@ -77,7 +78,12 @@ QVector<EpisodeRow> fetchEpisodeRows(const QString &dbPath, int feedId, int limi
             r.pubDate = q.value(3).toLongLong();
             r.completed = q.value(4).toInt() != 0;
             const QString local = q.value(5).toString();
-            r.downloaded = !local.isEmpty();
+            r.downloaded = false;
+            if (!local.isEmpty()) {
+                QFileInfo info(local);
+                // Ignore tiny redirect/error stubs left by older builds.
+                r.downloaded = info.isFile() && info.size() >= 64 * 1024;
+            }
             r.positionMs = q.value(6).toInt();
             r.inQueue = q.value(7).toInt() != 0;
             rows.append(r);
