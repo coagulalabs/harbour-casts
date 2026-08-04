@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>Subscriptions</title></head>
+  <body>
+    <outline text="Folder">
+      <outline text="Cast A" title="Cast A" type="rss" xmlUrl="https://example.com/a.xml"/>
+      <outline text="Cast B" xmlUrl="https://example.com/b.xml"/>
+    </outline>
+    <outline text="No URL"/>
+  </body>
+</opml>

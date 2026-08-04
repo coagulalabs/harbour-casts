@@ -22,33 +22,34 @@ Page {
         previewBody: ""
     }
 
-    PullDownMenu {
-        MenuItem {
-            text: qsTr("Add podcast")
-            onClicked: pageStack.push(Qt.resolvedUrl("AddPodcastPage.qml"))
-        }
-        MenuItem {
-            text: qsTr("Refresh all")
-            enabled: !PodcastStore.busy
-            onClicked: PodcastStore.refreshAll()
-        }
-        MenuItem {
-            visible: PodcastStore.queueCount > 0
-            text: qsTr("Queue (%1)").arg(PodcastStore.queueCount)
-            onClicked: pageStack.push(Qt.resolvedUrl("QueuePage.qml"))
-        }
-        MenuItem {
-            visible: Player.active
-            text: qsTr("Now playing")
-            onClicked: pageStack.push(Qt.resolvedUrl("PlayerPage.qml"))
-        }
-    }
-
     SilicaListView {
         id: list
         anchors.fill: parent
         anchors.bottomMargin: playbackBar.visible ? playbackBar.height : 0
         model: PodcastStore.subscriptionsModel
+
+        PullDownMenu {
+            busy: PodcastStore.busy
+            MenuItem {
+                text: qsTr("Add podcast")
+                onClicked: pageStack.push(Qt.resolvedUrl("AddPodcastPage.qml"))
+            }
+            MenuItem {
+                text: qsTr("Refresh all")
+                enabled: !PodcastStore.busy
+                onClicked: PodcastStore.refreshAll()
+            }
+            MenuItem {
+                visible: PodcastStore.queueCount > 0
+                text: qsTr("Queue (%1)").arg(PodcastStore.queueCount)
+                onClicked: pageStack.push(Qt.resolvedUrl("QueuePage.qml"))
+            }
+            MenuItem {
+                visible: Player.active
+                text: qsTr("Now playing")
+                onClicked: pageStack.push(Qt.resolvedUrl("PlayerPage.qml"))
+            }
+        }
 
         header: Column {
             width: list.width

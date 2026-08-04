@@ -11,31 +11,35 @@ Page {
             PodcastStore.loadEpisodes(PodcastStore.openFeedId)
     }
 
-    PullDownMenu {
-        MenuItem {
-            text: qsTr("Refresh feed")
-            enabled: !PodcastStore.busy
-            onClicked: PodcastStore.refreshFeed(PodcastStore.openFeedId)
-        }
-        MenuItem {
-            text: qsTr("Remove subscription")
-            onClicked: {
-                PodcastStore.removeFeed(PodcastStore.openFeedId);
-                pageStack.pop();
-            }
-        }
-    }
-
     BusyIndicator {
         anchors.centerIn: parent
-        running: PodcastStore.episodesLoading
+        running: PodcastStore.episodesLoading && list.count === 0
+        size: BusyIndicatorSize.Large
+        z: 1
     }
+
+    RemorsePopup { id: remorse }
 
     SilicaListView {
         id: list
         anchors.fill: parent
-        visible: !PodcastStore.episodesLoading
         model: PodcastStore.episodesModel
+
+        PullDownMenu {
+            busy: PodcastStore.busy || PodcastStore.episodesLoading
+            MenuItem {
+                text: qsTr("Refresh feed")
+                enabled: !PodcastStore.busy
+                onClicked: PodcastStore.refreshFeed(PodcastStore.openFeedId)
+            }
+            MenuItem {
+                text: qsTr("Remove subscription")
+                onClicked: remorse.execute(qsTr("Removing subscription"), function() {
+                    PodcastStore.removeFeed(PodcastStore.openFeedId);
+                    pageStack.pop();
+                })
+            }
+        }
 
         header: PageHeader {
             title: PodcastStore.openFeedTitle.length > 0

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Harbour Test Cast</title>
+    <description>A &lt;b&gt;sample&amp;nbsp;feed&lt;/b&gt; for unit tests.</description>
+    <image>
+      <url>https://example.com/cover.png</url>
+    </image>
+    <item>
+      <title>Episode One</title>
+      <guid>ep-1</guid>
+      <pubDate>Mon, 03 Aug 2026 12:00:00 GMT</pubDate>
+      <itunes:duration>1:02:03</itunes:duration>
+      <description>&lt;p&gt;Hello &amp;amp; welcome.&lt;/p&gt;</description>
+      <enclosure url="https://example.com/ep1.mp3" type="audio/mpeg" length="12345"/>
+    </item>
+    <item>
+      <title>No Audio Skip Me</title>
+      <guid>ep-skip</guid>
+      <description>Should be ignored</description>
+    </item>
+    <item>
+      <title>Episode Two</title>
+      <guid>ep-2</guid>
+      <pubDate>Tue, 04 Aug 2026 09:30:00 GMT</pubDate>
+      <itunes:duration>90</itunes:duration>
+      <enclosure url="https://example.com/ep2.m4a" type="audio/mp4" length="999"/>
+    </item>
+  </channel>
+</rss>
