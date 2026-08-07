@@ -1,3 +1,7 @@
+* Fri Aug 07 2026 Open Source Developer
+- v1.1.5: Fix OPML import file picker and multi-feed subscribe queue
+- Follow redirects / validate cached cover art (HTTP Flickr covers)
+
 * Tue Aug 04 2026 Open Source Developer
 - v1.1.4: Fix episode downloads through multi-hop CDN redirects
 - Progress indicators and success/failure notifications

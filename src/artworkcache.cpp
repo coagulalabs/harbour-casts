@@ -7,6 +7,37 @@
 #include <QNetworkRequest>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QDebug>
+
+namespace {
+
+bool looksLikeImage(const QByteArray &data)
+{
+    if (data.size() < 24)
+        return false;
+    // JPEG / PNG / GIF / WEBP (RIFF....WEBP)
+    if (uchar(data.at(0)) == 0xFF && uchar(data.at(1)) == 0xD8)
+        return true;
+    if (data.startsWith("\x89PNG\r\n\x1a\n"))
+        return true;
+    if (data.startsWith("GIF87a") || data.startsWith("GIF89a"))
+        return true;
+    if (data.size() >= 12 && data.startsWith("RIFF") && data.mid(8, 4) == "WEBP")
+        return true;
+    return false;
+}
+
+QString upgradeToHttps(const QString &remoteUrl)
+{
+    QUrl url(remoteUrl);
+    if (url.scheme() == QLatin1String("http")) {
+        url.setScheme(QStringLiteral("https"));
+        return url.toString();
+    }
+    return remoteUrl;
+}
+
+} // namespace
 
 ArtworkCache::ArtworkCache(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -39,7 +70,15 @@ QString ArtworkCache::localPath(int feedId) const
         QStringList() << QString::number(feedId) + QStringLiteral(".*"),
         QDir::Files);
     if (matches.isEmpty()) return QString();
-    return dir.filePath(matches.first());
+    const QString path = dir.filePath(matches.first());
+    // Reject leftover redirect/error bodies (e.g. 167-byte CloudFront HTML).
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly) || f.size() < 256)
+        return QString();
+    const QByteArray head = f.read(16);
+    if (!looksLikeImage(head))
+        return QString();
+    return path;
 }
 
 QString ArtworkCache::resolve(int feedId, const QString &remoteUrl) const
@@ -59,9 +98,22 @@ void ArtworkCache::prefetch(int feedId, const QString &remoteUrl)
     }
     if (m_inFlight.contains(feedId)) return;
 
+    // Drop any corrupt cache entry so we can rewrite it.
+    const QDir dir(cacheDir());
+    const QStringList matches = dir.entryList(
+        QStringList() << QString::number(feedId) + QStringLiteral(".*"),
+        QDir::Files);
+    for (const QString &name : matches)
+        QFile::remove(dir.filePath(name));
+
     QNetworkRequest req;
-    req.setUrl(QUrl(remoteUrl));
-    req.setRawHeader("User-Agent", "harbour-casts/1.1");
+    req.setUrl(QUrl(upgradeToHttps(remoteUrl)));
+    req.setRawHeader("User-Agent",
+                     "Mozilla/5.0 (Mobile; Sailfish; rv:1.0) harbour-casts/1.1");
+    req.setRawHeader("Accept", "image/*,*/*;q=0.2");
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
+    req.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+#endif
     QNetworkReply *reply = m_nam->get(req);
     m_inFlight.insert(feedId);
     m_replyFeedIds.insert(reply, feedId);
@@ -78,7 +130,7 @@ void ArtworkCache::onReplyFinished()
 
     if (reply->error() == QNetworkReply::NoError) {
         const QByteArray data = reply->readAll();
-        if (!data.isEmpty()) {
+        if (looksLikeImage(data)) {
             const QString path = cacheDir() + QLatin1Char('/')
                 + QString::number(feedId) + extensionForUrl(reply->url().toString());
             QFile f(path);
@@ -87,7 +139,14 @@ void ArtworkCache::onReplyFinished()
                 f.close();
                 emit artworkCached(feedId);
             }
+        } else {
+            qWarning() << "Artwork fetch not an image for feed" << feedId
+                       << "bytes" << data.size()
+                       << "url" << reply->url();
         }
+    } else {
+        qWarning() << "Artwork fetch failed for feed" << feedId
+                   << reply->errorString() << reply->url();
     }
 
     reply->deleteLater();

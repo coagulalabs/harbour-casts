@@ -5,6 +5,7 @@
 #include <QNetworkAccessManager>
 #include <QString>
 #include <QVariantList>
+#include <QVector>
 
 class EpisodesModel;
 class SubscriptionsModel;
@@ -118,6 +119,7 @@ private:
     void setError(const QString &message);
     QString normalizeFeedUrl(const QString &url) const;
     void fetchFeed(const QString &url, int existingFeedId = -1);
+    void startNextFeedFetch();
     void ingestFeed(const struct ParsedFeed &feed, int existingFeedId);
     void updateQueueCount();
     QString downloadsDir() const;
@@ -132,11 +134,18 @@ private:
     bool openDownloadFile();
     static bool isRedirectStatus(int status);
 
+    struct PendingFeedFetch {
+        QString url;
+        int feedId = -1;
+    };
+
     ArtworkCache *m_artwork = nullptr;
     QNetworkAccessManager m_nam;
     QNetworkReply *m_feedReply = nullptr;
     QNetworkReply *m_downloadReply = nullptr;
     QFile *m_downloadFile = nullptr;
+    QVector<PendingFeedFetch> m_feedFetchQueue;
+    int m_feedFetchTotal = 0;
     QString m_pendingFeedUrl;
     int m_pendingFeedId = -1;
     int m_downloadEpisodeId = 0;

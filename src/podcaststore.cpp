@@ -170,19 +170,41 @@ void PodcastStore::refreshAll()
 
 void PodcastStore::fetchFeed(const QString &url, int existingFeedId)
 {
-    if (m_feedReply) {
-        m_feedReply->abort();
-        m_feedReply->deleteLater();
-        m_feedReply = nullptr;
+    // Queue requests so OPML import / refresh-all don't abort each other.
+    PendingFeedFetch item;
+    item.url = url;
+    item.feedId = existingFeedId;
+    m_feedFetchQueue.append(item);
+    if (m_feedFetchTotal < m_feedFetchQueue.size() + (m_feedReply ? 1 : 0))
+        m_feedFetchTotal = m_feedFetchQueue.size() + (m_feedReply ? 1 : 0);
+    startNextFeedFetch();
+}
+
+void PodcastStore::startNextFeedFetch()
+{
+    if (m_feedReply)
+        return;
+
+    if (m_feedFetchQueue.isEmpty()) {
+        m_feedFetchTotal = 0;
+        setBusy(false);
+        return;
     }
 
-    m_pendingFeedUrl = url;
-    m_pendingFeedId = existingFeedId;
+    const PendingFeedFetch next = m_feedFetchQueue.takeFirst();
+    m_pendingFeedUrl = next.url;
+    m_pendingFeedId = next.feedId;
     setBusy(true);
-    setStatus(tr("Fetching feed…"));
+
+    const int done = m_feedFetchTotal - m_feedFetchQueue.size();
+    if (m_feedFetchTotal > 1) {
+        setStatus(tr("Fetching feed %1 of %2…").arg(done).arg(m_feedFetchTotal));
+    } else {
+        setStatus(tr("Fetching feed…"));
+    }
 
     QNetworkRequest req;
-    configureRequest(&req, QUrl(url));
+    configureRequest(&req, QUrl(next.url));
     m_feedReply = m_nam.get(req);
     connect(m_feedReply, &QNetworkReply::finished, this, &PodcastStore::onFeedReplyFinished);
 }
@@ -191,9 +213,11 @@ void PodcastStore::onFeedReplyFinished()
 {
     QNetworkReply *reply = m_feedReply;
     m_feedReply = nullptr;
-    setBusy(false);
 
-    if (!reply) return;
+    if (!reply) {
+        startNextFeedFetch();
+        return;
+    }
 
     const QString url = m_pendingFeedUrl;
     const int feedId = m_pendingFeedId;
@@ -202,12 +226,14 @@ void PodcastStore::onFeedReplyFinished()
     if (reply->error() != QNetworkReply::NoError) {
         qWarning() << "Feed fetch failed:" << url << reply->errorString();
         setError(tr("Feed fetch failed: %1").arg(reply->errorString()));
+        startNextFeedFetch();
         return;
     }
 
     const QByteArray body = reply->readAll();
     if (body.isEmpty()) {
         setError(tr("Feed returned no data"));
+        startNextFeedFetch();
         return;
     }
 
@@ -215,10 +241,12 @@ void PodcastStore::onFeedReplyFinished()
     if (!FeedParser::parseRss(body, url, &feed)) {
         qWarning() << "Feed parse failed:" << url << "bytes" << body.size();
         setError(tr("Could not parse feed (got %1 bytes)").arg(body.size()));
+        startNextFeedFetch();
         return;
     }
 
     ingestFeed(feed, feedId);
+    startNextFeedFetch();
 }
 
 void PodcastStore::ingestFeed(const ParsedFeed &feed, int existingFeedId)
@@ -320,11 +348,21 @@ void PodcastStore::removeFeed(int feedId)
     emit episodesChanged();
 }
 
-void PodcastStore::importOpmlFile(const QString &path)
+void PodcastStore::importOpmlFile(const QString &pathOrUrl)
 {
+    QString path = pathOrUrl.trimmed();
+    if (path.startsWith(QLatin1String("file:"))) {
+        const QUrl url(path);
+        if (url.isLocalFile())
+            path = url.toLocalFile();
+        else if (path.startsWith(QLatin1String("file://")))
+            path = QUrl::fromPercentEncoding(path.mid(7).toUtf8());
+    }
+
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
-        emit error(tr("Cannot read OPML file"));
+        qWarning() << "OPML open failed:" << path << f.errorString();
+        emit error(tr("Cannot read OPML file: %1").arg(path));
         return;
     }
     const QVector<OpmlOutline> outlines = FeedParser::parseOpml(f.readAll());
@@ -333,8 +371,10 @@ void PodcastStore::importOpmlFile(const QString &path)
         return;
     }
     setStatus(tr("Importing %1 feeds…").arg(outlines.size()));
-    for (const OpmlOutline &o : outlines)
-        fetchFeed(o.xmlUrl);
+    for (const OpmlOutline &o : outlines) {
+        if (!o.xmlUrl.trimmed().isEmpty())
+            fetchFeed(o.xmlUrl.trimmed());
+    }
 }
 
 void PodcastStore::loadEpisodes(int feedId)

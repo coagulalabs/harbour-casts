@@ -2,7 +2,7 @@
 
 Native podcast player for [Sailfish OS](https://sailfishos.org/). No trackers, no ads, full offline support.
 
-**Version:** 1.1.4 · **License:** [BSD-3-Clause](LICENSE) · **Targets:** aarch64 (Jolla C2) and armv7hl
+**Version:** 1.1.5 · **License:** [BSD-3-Clause](LICENSE) · **Targets:** aarch64 (Jolla C2) and armv7hl
 
 ## Features
 
@@ -20,9 +20,9 @@ Native podcast player for [Sailfish OS](https://sailfishos.org/). No trackers, n
 Grab the latest RPM from [Releases](https://github.com/coagulalabs/harbour-casts/releases) (or OpenRepos when published) and install on device:
 
 ```bash
-pkcon install-local harbour-casts-1.1.4-1.aarch64.rpm
+pkcon install-local harbour-casts-1.1.5-1.aarch64.rpm
 # or on older 32-bit devices:
-pkcon install-local harbour-casts-1.1.4-1.armv7hl.rpm
+pkcon install-local harbour-casts-1.1.5-1.armv7hl.rpm
 ```
 
 ## Build

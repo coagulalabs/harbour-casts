@@ -9,6 +9,17 @@ Page {
 
     property bool waitingForFeed: false
 
+    function pathFromPicker(props) {
+        if (!props)
+            return ""
+        if (props.filePath && props.filePath.length > 0)
+            return props.filePath
+        var url = props.url ? props.url.toString() : ""
+        if (url.indexOf("file://") === 0)
+            return decodeURIComponent(url.substring(7))
+        return url
+    }
+
     Connections {
         target: PodcastStore
         onFeedAdded: {
@@ -40,6 +51,7 @@ Page {
                 x: Theme.horizontalPageMargin
                 placeholderText: qsTr("https://example.com/feed.xml")
                 focus: !PodcastStore.busy
+                inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
             }
 
             Label {
@@ -73,7 +85,10 @@ Page {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("Import OPML file")
                 enabled: !PodcastStore.busy
-                onClicked: opmlPicker.open()
+                // FilePicker browses the filesystem (incl. Downloads).
+                // DocumentPicker only lists Tracker "documents", so .opml never appears
+                // and Accept stays disabled — which matches the XA2 report.
+                onClicked: pageStack.animatorPush(opmlPickerPage)
             }
 
             Label {
@@ -82,23 +97,30 @@ Page {
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeSmall
-                text: qsTr("Export your subscriptions from another podcast app as OPML and import them here.")
+                text: qsTr("Place an OPML export (e.g. from gPodder) in Downloads, then choose the .opml or .xml file here.")
             }
         }
         VerticalScrollDecorator {}
     }
 
-    MultiDocumentPickerDialog {
-        id: opmlPicker
-        onDone: {
-            if (result !== DialogResult.Accepted || selectedContent.count === 0)
-                return;
-            var url = selectedContent.get(0).url.toString();
-            if (url.indexOf("file://") === 0)
-                url = url.substring(7);
-            waitingForFeed = false;
-            PodcastStore.importOpmlFile(url);
-            pageStack.pop();
+    Component {
+        id: opmlPickerPage
+        FilePickerPage {
+            title: qsTr("Select OPML file")
+            nameFilters: [ "*.opml", "*.xml" ]
+            onSelectedContentPropertiesChanged: {
+                var path = page.pathFromPicker(selectedContentProperties)
+                if (!path || path.length === 0)
+                    return
+                waitingForFeed = false
+                PodcastStore.importOpmlFile(path)
+                // Pop FilePicker + Add page back to subscriptions.
+                var dest = pageStack.previousPage(page)
+                if (dest)
+                    pageStack.pop(dest)
+                else
+                    pageStack.pop()
+            }
         }
     }
 }
